@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Objednávky Vysílač/Přijímač</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 12px;
+    }
+
+    h1 { text-align: center; margin-bottom: 16px; }
+
+    .panel {
+      border: 1px solid #eee;
+      padding: 16px;
+      border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.03);
+      margin-bottom: 16px;
+    }
+
+    button {
+      padding: 12px 16px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      flex: 1;
+    }
+
+    .btn-primary { background: #111; color: #fff; }
+    .btn-ghost { background: #f6f6f6; }
+
+    #modeSelect {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .extras {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .extras label {
+      flex: 1 1 100%;
+      min-width: 120px;
+    }
+
+    select, input[type="checkbox"] {
+      margin-right: 6px;
+      transform: scale(1.1);
+    }
+
+    .order-list {
+      margin-top: 12px;
+    }
+
+    .order-item {
+      padding: 10px;
+      border-radius: 8px;
+      background: #fafafa;
+      margin-bottom: 8px;
+      word-break: break-word;
+    }
+
+    .order-item input[type="checkbox"] {
+        transform: scale(1.5);
+        cursor: pointer;
+    }
+
+    .order-item.fade-out {
+        opacity: 0;
+        transition: opacity 0.8s ease;
+    }
+
+    @media (max-width: 480px) {
+      body { padding: 8px; }
+      button { font-size: 14px; padding: 10px; }
+      .extras label { font-size: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Objednávky</h1>
+  <p>Vyber režim:</p>
+
+  <div id="modeSelect">
+    <button id="sendModeBtn" class="btn-primary">Vysílat (Pokladna)</button>
+    <button id="receiveModeBtn" class="btn-ghost">Přijímat (Kuchaře)</button>
+  </div>
+
+  <div class="panel" id="sender" style="display:none">
+    <h2>Vysílač</h2>
+    <label>
+      Vyber jídlo:
+      <select id="item">
+        <option>Palačinky</option>
+      </select>
+    </label>
+
+    <div class="extras">
+       <label><input type="checkbox" value="JAHODOVÁ MARMELÁDA" class="extra"> Jahodová marmeláda</label>
+       <label><input type="checkbox" value="TŘEŠŇOVÁ MARMELÁDA" class="extra"> Třešňová marmeláda</label>
+       <label><input type="checkbox" value="RYBÍZOVÁ MARMELÁDA" class="extra"> Rybízová marmeláda</label>
+       <label><input type="checkbox" value="NUTELLA/LÍSKOOŘÍŠKOVÝ KRÉM" class="extra"> Nutella/Lískooříškový krém</label>
+       <label><input type="checkbox" value="ŠLEHAČKA" class="extra"> Šlehačka</label>
+       <label><input type="checkbox" value="EXTRA ŠLEHAČKA" class="extra"> Šlehačka extra</label>
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap: wrap;">
+      <button id="sendBtn" class="btn-primary">Poslat objednávku č. ?</button>
+      <button id="clearBtn" class="btn-ghost">Vymazat výběr (nová objednávka)</button>
+    </div>
+
+    <p style="margin-top:8px;color:#666;font-size:14px">Status: <span id="sendStatus">není připojen k databázi</span></p>
+  </div>
+
+  <div class="panel" id="receiver" style="display:none">
+    <h2>Přijímač</h2>
+    <p>Objednávky se objeví zde:</p>
+    <div class="order-list" id="orders"></div>
+  </div>
+
+  <!-- Firebase Realtime Database (CDN) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBfuY4ZvGJVBVtjoTQpdEqSmTGYQhRruNc",
+      authDomain: "order-de.firebaseapp.com",
+      databaseURL: "https://order-de-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "order-de",
+      storageBucket: "order-de.firebasestorage.app",
+      messagingSenderId: "366891884570",
+      appId: "1:366891884570:web:fb93b67214061dea9af1a3"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+      // Order numbering system
+     let globalOrderNumber = 0;
+
+     // Load the counter once
+     db.ref("orderCounter").once("value").then(snap => {
+         globalOrderNumber = snap.val() || 0;
+         sendBtn.textContent = `Poslat objednávku č. ${globalOrderNumber + 1}`;
+     });
+
+
+    const sendBtn = document.getElementById('sendBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const itemSel = document.getElementById('item');
+    const extras = document.querySelectorAll('.extra');
+    const sendStatus = document.getElementById('sendStatus');
+    const ordersNode = document.getElementById('orders');
+
+    const senderPanel = document.getElementById('sender');
+    const receiverPanel = document.getElementById('receiver');
+    const modeSelect = document.getElementById('modeSelect');
+    const sendModeBtn = document.getElementById('sendModeBtn');
+    const receiveModeBtn = document.getElementById('receiveModeBtn');
+
+    sendModeBtn.addEventListener('click', () => {
+      senderPanel.style.display = 'block';
+      receiverPanel.style.display = 'none';
+      modeSelect.style.display = 'none';
+    });
+
+    receiveModeBtn.addEventListener('click', () => {
+      senderPanel.style.display = 'none';
+      receiverPanel.style.display = 'block';
+      modeSelect.style.display = 'none';
+    });
+
+    function updateStatus(text){ sendStatus.textContent = text }
+    updateStatus('server přijímá');
+
+     sendBtn.addEventListener('click', () => {
+         // Increase global order number
+         globalOrderNumber++;
+         db.ref("orderCounter").set(globalOrderNumber);
+
+         const item = itemSel.value;
+         const selected = Array.from(extras).filter(c => c.checked).map(c => c.value);
+
+         const order = {
+             item,
+             extras: selected,
+             sentAt: Date.now(),
+             number: globalOrderNumber
+         };
+
+         const newOrderRef = db.ref('orders').push();
+
+         newOrderRef.set(order)
+             .then(() => {
+                 // 1️. Clear selections (like clear button)
+                 extras.forEach(e => e.checked = false);
+                 itemSel.selectedIndex = 0;
+
+                 // 2️. Update send button to next number
+                 sendBtn.textContent = `Poslat objednávku č. ${globalOrderNumber + 1}`;
+
+                 // 3️. Flash status for 2 seconds
+                 sendStatus.textContent = `objednávka odeslána`;
+                 setTimeout(() => {
+                     sendStatus.textContent = "server přijímá";
+                 }, 2000);
+             })
+             .catch(err => {
+                 sendStatus.textContent = `Chyba: ${err.message}`;
+             });
+     });
+
+
+
+
+
+    clearBtn.addEventListener('click', ()=>{
+      extras.forEach(e=>e.checked=false);
+      itemSel.selectedIndex = 0;
+       sendStatus.textContent = "vymazáno";
+       setTimeout(() => {
+           sendStatus.textContent = "server přijímá"; // reset after 2 seconds
+       }, 2000);
+    });
+
+    const ordersRef = db.ref('orders');
+      ordersRef.on('child_added', snapshot => {
+          const data = snapshot.val();
+          if (!data) return;
+            
+          const extrasText = (data.extras && data.extras.length) ? data.extras.join(', ') : 'nic navíc';
+          const ts = new Date(data.sentAt).toLocaleString();
+
+          const div = document.createElement('div');
+          div.className = 'order-item';
+
+          const span = document.createElement('span');
+          span.textContent = `Přijatá objednávka #${data.number}: ${data.item} s ${extrasText} — ${ts}`;
+          div.appendChild(span);
+
+          // Create checkbox
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.style.marginLeft = '12px';
+          checkbox.style.transform = 'scale(1.4)';
+          checkbox.style.cursor = 'pointer';
+          checkbox.title = "Označit jako hotovo";
+
+          // ⭐ Animation: check → wait → fade out → remove
+          checkbox.addEventListener('change', () => {
+              if (checkbox.checked) {
+                  div.classList.add('fade-out');
+                  setTimeout(() => div.remove(), 1000); // 1 second delay
+              }
+          });
+
+          div.appendChild(checkbox);
+          ordersNode.prepend(div);
+      });
+
+
+
+  </script>
+</body>
+</html>
